@@ -49,7 +49,7 @@ function TypeChips({ lang, setLang }: { lang: string; setLang: (v: string) => vo
   );
 }
 
-function Home({ open }: { open: (m: Manga) => void }) {
+function Home({ open, anyLang }: { open: (m: Manga) => void; anyLang: boolean }) {
   const [lang, setLang] = useState("");
   const [rows, setRows] = useState<[string, Manga[]][]>([]);
   const [err, setErr] = useState("");
@@ -65,13 +65,13 @@ function Home({ open }: { open: (m: Manga) => void }) {
     };
     (async () => {
       try {
-        add("🔥 Popular", (await listManga({ lang, limit: 20 })).items);
-        add("🆕 Just updated", (await listManga({ lang, sort: "latest", limit: 20 })).items);
+        add("🔥 Popular", (await listManga({ anyLang, lang, limit: 20 })).items);
+        add("🆕 Just updated", (await listManga({ anyLang, lang, sort: "latest", limit: 20 })).items);
         const genres = await getGenres();
         for (const name of HOME_GENRES) {
           const g = genres.find((x) => x.name === name);
           if (!g || dead) continue;
-          add(`${EMOJI[name] ?? "✨"} ${name}`, (await listManga({ lang, tag: g.id, limit: 20 })).items);
+          add(`${EMOJI[name] ?? "✨"} ${name}`, (await listManga({ anyLang, lang, tag: g.id, limit: 20 })).items);
         }
       } catch (e: any) {
         if (!dead) setErr(e.message);
@@ -82,7 +82,7 @@ function Home({ open }: { open: (m: Manga) => void }) {
     return () => {
       dead = true;
     };
-  }, [lang]);
+  }, [lang, anyLang]);
 
   return (
     <>
@@ -103,7 +103,7 @@ function Home({ open }: { open: (m: Manga) => void }) {
   );
 }
 
-function Browse({ open }: { open: (m: Manga) => void }) {
+function Browse({ open, anyLang }: { open: (m: Manga) => void; anyLang: boolean }) {
   const [q, setQ] = useState("");
   const [lang, setLang] = useState("");
   const [tag, setTag] = useState("");
@@ -122,7 +122,7 @@ function Browse({ open }: { open: (m: Manga) => void }) {
       setBusy(true);
       setErr("");
       try {
-        const r = await listManga({ q: q.trim() || undefined, lang: lang || undefined, tag: tag || undefined, offset });
+        const r = await listManga({ anyLang, q: q.trim() || undefined, lang: lang || undefined, tag: tag || undefined, offset });
         setItems((p) => (offset ? [...p, ...r.items] : r.items));
         setTotal(r.total);
       } catch (e: any) {
@@ -131,7 +131,7 @@ function Browse({ open }: { open: (m: Manga) => void }) {
         setBusy(false);
       }
     },
-    [q, lang, tag]
+    [q, lang, tag, anyLang]
   );
 
   useEffect(() => {
@@ -181,7 +181,7 @@ function Detail(props: {
   const [chs, setChs] = useState<Chapter[] | null>(null);
   const [err, setErr] = useState("");
   useEffect(() => {
-    getFeed(m.id).then(setChs).catch((e) => setErr(e.message));
+    getFeed(m.id, m.lang).then(setChs).catch((e) => setErr(e.message));
   }, [m.id]);
 
   const links = m.links ?? {};
@@ -311,6 +311,7 @@ function Reader(props: { list: Chapter[]; idx: number; setIdx: (i: number) => vo
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("home");
+  const [anyLang, setAnyLang] = useState<boolean>(store.get("anyLang", false));
   const [manga, setManga] = useState<Manga | null>(null);
   const [reading, setReading] = useState<{ list: Chapter[]; idx: number } | null>(null);
   const [lib, setLib] = useState<Manga[]>(store.get("lib", []));
@@ -356,10 +357,19 @@ export default function App() {
     <div className="shell">
       <header>
         <span className="logo">Ink<b>pop</b></span>
+        <button
+          className="langbtn"
+          onClick={() => {
+            store.set("anyLang", !anyLang);
+            setAnyLang(!anyLang);
+          }}
+        >
+          {anyLang ? "🌐 Any language" : "🇬🇧 English"}
+        </button>
       </header>
       <main>
-        {tab === "home" && <Home open={setManga} />}
-        {tab === "browse" && <Browse open={setManga} />}
+        {tab === "home" && <Home open={setManga} anyLang={anyLang} />}
+        {tab === "browse" && <Browse open={setManga} anyLang={anyLang} />}
         {tab === "library" &&
           (lib.length ? (
             <div className="grid">

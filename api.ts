@@ -69,6 +69,7 @@ export async function listManga(o: {
   sort?: "popular" | "latest";
   offset?: number;
   limit?: number;
+  anyLang?: boolean;
 }) {
   const p: Params = {
     limit: o.limit ?? 24,
@@ -78,6 +79,7 @@ export async function listManga(o: {
     "availableTranslatedLanguage[]": ["en"],
     hasAvailableChapters: "true",
   };
+  if (o.anyLang) delete p["availableTranslatedLanguage[]"];
   if (o.q) p.title = o.q;
   if (o.lang) p["originalLanguage[]"] = [o.lang];
   if (o.tag) p["includedTags[]"] = [o.tag];
@@ -102,12 +104,12 @@ const usable = (c: any) => c.attributes.pages > 0 || !!c.attributes.externalUrl;
 
 // All chapters, newest first, one entry per chapter number.
 // Prefers pages hosted on MangaDex, then English. Falls back to other languages if English has nothing readable.
-export async function getFeed(id: string): Promise<Chapter[]> {
+export async function getFeed(id: string, orig = ""): Promise<Chapter[]> {
   let raw = await fetchFeed(id, ["en"]);
   if (!raw.some((c) => usable(c) && !c.attributes.externalUrl)) {
     raw = [...raw, ...(await fetchFeed(id))];
   }
-  const score = (c: Chapter) => (c.ext ? 0 : 2) + (c.lang === "en" ? 1 : 0);
+  const score = (c: Chapter) => (c.ext ? 0 : 4) + (c.lang === "en" ? 2 : 0) + (c.lang === orig ? 1 : 0);
   const out = new Map<string, Chapter>();
   for (const c of raw) {
     if (!usable(c)) continue;

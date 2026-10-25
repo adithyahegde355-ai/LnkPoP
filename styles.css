@@ -76,3 +76,6 @@ nav button.on { color: var(--pink); }
 .official a { padding: 8px 14px; border-radius: 99px; background: var(--purple); color: #fff; font-size: 13px; font-weight: 700; text-decoration: none; }
 .ch.ext { border-left-color: var(--purple); }
 .lang { font-style: normal; font-size: 10px; font-weight: 700; background: var(--teal); color: #fff; padding: 2px 6px; border-radius: 99px; }
+
+header { display: flex; justify-content: space-between; align-items: center; }
+.langbtn { padding: 6px 12px; border-radius: 99px; background: #fff; color: var(--pink); font-weight: 700; font-size: 13px; }
