@@ -6,10 +6,11 @@ type Tab = "home" | "browse" | "library";
 
 const LANG_LABEL: Record<string, string> = { ko: "Manhwa", ja: "Manga", zh: "Manhua" };
 const TYPES = [["All", ""], ["Manhwa", "ko"], ["Manga", "ja"], ["Manhua", "zh"]];
-const HOME_GENRES = ["Action", "Romance", "Fantasy", "Comedy", "Drama", "Isekai", "Horror", "Adventure", "Mystery", "Sci-Fi"];
+const HOME_GENRES = ["Action", "Romance", "Fantasy", "Comedy", "Drama", "Isekai", "Horror", "Adventure", "Mystery", "Sci-Fi", "Slice of Life", "Historical", "Psychological"];
 const EMOJI: Record<string, string> = {
   Action: "💥", Romance: "💕", Fantasy: "🧙", Comedy: "😂", Drama: "🎭", Isekai: "🌀",
   Horror: "👻", Adventure: "🗺️", Mystery: "🕵️", "Sci-Fi": "🚀",
+  "Slice of Life": "🌸", Historical: "🏯", Psychological: "🧠",
 };
 
 const store = {
