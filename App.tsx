@@ -1,17 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App as CapApp } from "@capacitor/app";
-import { Chapter, Manga, Tag, getFeed, getGenres, getPages, listManga } from "./api";
+import { Chapter, Manga, MangaSource, getFeed, getPages, listAllAdultManga, listManga, listMangaPDF } from "./api";
 
 type Tab = "home" | "browse" | "library";
 
 const LANG_LABEL: Record<string, string> = { ko: "Manhwa", ja: "Manga", zh: "Manhua" };
-const TYPES = [["All", ""], ["Manhwa", "ko"], ["Manga", "ja"], ["Manhua", "zh"]];
-const HOME_GENRES = ["Action", "Romance", "Fantasy", "Comedy", "Drama", "Isekai", "Horror", "Adventure", "Mystery", "Sci-Fi", "Slice of Life", "Historical", "Psychological"];
-const EMOJI: Record<string, string> = {
-  Action: "💥", Romance: "💕", Fantasy: "🧙", Comedy: "😂", Drama: "🎭", Isekai: "🌀",
-  Horror: "👻", Adventure: "🗺️", Mystery: "🕵️", "Sci-Fi": "🚀",
-  "Slice of Life": "🌸", Historical: "🏯", Psychological: "🧠",
-};
 
 const store = {
   get<T>(k: string, d: T): T {
@@ -38,134 +31,187 @@ function Poster({ m, open }: { m: Manga; open: (m: Manga) => void }) {
   );
 }
 
-function TypeChips({ lang, setLang }: { lang: string; setLang: (v: string) => void }) {
-  return (
-    <div className="chips">
-      {TYPES.map(([label, v]) => (
-        <button key={label} className={lang === v ? "chip on" : "chip"} onClick={() => setLang(v)}>
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Home({ open, anyLang }: { open: (m: Manga) => void; anyLang: boolean }) {
-  const [lang, setLang] = useState("");
+function Home({ open }: { open: (m: Manga) => void }) {
   const [rows, setRows] = useState<[string, Manga[]][]>([]);
+  const [adultRows, setAdultRows] = useState<[string, Manga[]][]>([]);
+  const [adultUnlocked, setAdultUnlocked] = useState(false);
+  const [adultBusy, setAdultBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [done, setDone] = useState(false);
-
   useEffect(() => {
-    let dead = false;
-    setRows([]);
-    setErr("");
-    setDone(false);
-    const add = (t: string, items: Manga[]) => {
-      if (!dead && items.length) setRows((r) => [...r, [t, items]]);
-    };
-    (async () => {
-      try {
-        add("🔥 Popular", (await listManga({ anyLang, lang, limit: 20 })).items);
-        add("🆕 Just updated", (await listManga({ anyLang, lang, sort: "latest", limit: 20 })).items);
-        const genres = await getGenres();
-        for (const name of HOME_GENRES) {
-          const g = genres.find((x) => x.name === name);
-          if (!g || dead) continue;
-          add(`${EMOJI[name] ?? "✨"} ${name}`, (await listManga({ anyLang, lang, tag: g.id, limit: 20 })).items);
-        }
-      } catch (e: any) {
-        if (!dead) setErr(e.message);
-      } finally {
-        if (!dead) setDone(true);
-      }
-    })();
-    return () => {
-      dead = true;
-    };
-  }, [lang, anyLang]);
+    Promise.all([
+      listManga({ lang: "ko", limit: 15 }),
+      listManga({ lang: "ja", limit: 15 }),
+      listManga({ lang: "zh", limit: 15 }),
+      listManga({ sort: "latest", limit: 15 }),
+    ])
+      .then(([a, b, c, d]) =>
+        setRows([
+          ["🔥 Popular manhwa", a.items],
+          ["⚡ Popular manga", b.items],
+          ["🐉 Popular manhua", c.items],
+          ["🆕 Just updated", d.items],
+        ])
+      )
+      .catch((e) => setErr(e.message));
 
+    // Keep MangaPDF optional: an outage must not hide the MangaDex shelves.
+    listMangaPDF({ sort: "popular", page: 1 })
+      .then((pdf) => {
+        if (pdf.items.length) {
+          setRows((current) => [
+            ...current.filter(([title]) => title !== "📚 MangaPDF · Popular"),
+            ["📚 MangaPDF · Popular", pdf.items],
+          ]);
+        }
+      })
+      .catch(() => {});
+  }, []);
+  const loadAdult = async () => {
+    if (adultUnlocked || adultBusy) return;
+    setAdultBusy(true);
+    try {
+      const [ko, ja, zh] = await Promise.all([
+        listAllAdultManga("ko"),
+        listAllAdultManga("ja"),
+        listAllAdultManga("zh"),
+      ]);
+      setAdultRows([
+        ["🔞 H-Manhwa · English titles & chapters", ko],
+        ["🔞 Hentai Manga · English titles & chapters", ja],
+        ["🔞 H-Manhua · English titles & chapters", zh],
+      ]);
+      setAdultUnlocked(true);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setAdultBusy(false);
+    }
+  };
+  if (err && !rows.length) return <p className="note">{err}. Check your connection and reopen the app.</p>;
+  if (!rows.length) return <p className="note">Loading…</p>;
   return (
     <>
-      <TypeChips lang={lang} setLang={setLang} />
+      {err && <p className="note">{err}</p>}
       {rows.map(([title, items]) => (
         <section key={title}>
           <h2>{title}</h2>
           <div className="row">
             {items.map((m) => (
-              <Poster key={m.id} m={m} open={open} />
+              <Poster key={`${m.source}:${m.id}`} m={m} open={open} />
             ))}
           </div>
         </section>
       ))}
-      {err && <p className="note">{err}. Check your connection and switch tabs to retry.</p>}
-      {!done && <p className="note">Loading…</p>}
+      <section className="adult-section">
+        <h2>🔞 18+ Hentai Manga, H-Manhwa &amp; H-Manhua</h2>
+        {!adultUnlocked ? (
+          <div className="adult-gate">
+            <p>Adults only (18+). This section contains mature/sexually explicit fictional comics. By continuing, you confirm you are 18 or older and that viewing this content is legal where you live. The app loads all matching titles returned by the source, across result pages. Only titles with an English display title and free English chapters are requested; availability depends on the source.</p>
+            <button className="primary" onClick={loadAdult} disabled={adultBusy}>{adultBusy ? "Finding English chapters…" : "I am 18+ · Show adult titles"}</button>
+          </div>
+        ) : adultRows.map(([title, items]) => (
+          <section key={title}>
+            <h3>{title}</h3>
+            {items.length ? <div className="row">{items.map((m) => <Poster key={`${m.source}:${m.id}`} m={m} open={open} />)}</div> : <p className="note">No titles matching English-title and free-English-chapter filters were returned right now. The source catalogue may not currently have matches.</p>}
+          </section>
+        ))}
+      </section>
     </>
   );
 }
 
-function Browse({ open, anyLang }: { open: (m: Manga) => void; anyLang: boolean }) {
+function Browse({ open }: { open: (m: Manga) => void }) {
   const [q, setQ] = useState("");
   const [lang, setLang] = useState("");
-  const [tag, setTag] = useState("");
-  const [genres, setGenres] = useState<Tag[]>([]);
+  const [source, setSource] = useState<MangaSource>("mangadex");
   const [items, setItems] = useState<Manga[]>([]);
   const [total, setTotal] = useState(0);
+  const [hasNext, setHasNext] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  useEffect(() => {
-    getGenres().then(setGenres).catch(() => {});
-  }, []);
-
-  const load = useCallback(
-    async (offset: number) => {
-      setBusy(true);
-      setErr("");
-      try {
-        const r = await listManga({ anyLang, q: q.trim() || undefined, lang: lang || undefined, tag: tag || undefined, offset });
-        setItems((p) => (offset ? [...p, ...r.items] : r.items));
-        setTotal(r.total);
-      } catch (e: any) {
-        setErr(e.message);
-      } finally {
-        setBusy(false);
+  const load = useCallback(async (offset: number) => {
+    setBusy(true);
+    setErr("");
+    try {
+      if (source === "mangapdf") {
+        const page = Math.floor(offset / 40) + 1;
+        const result = await listMangaPDF({ q: q.trim() || undefined, page });
+        setItems((current) => offset ? [...current, ...result.items] : result.items);
+        setHasNext(result.hasNext);
+        setTotal(offset + result.items.length + (result.hasNext ? 1 : 0));
+      } else {
+        const result = await listManga({
+          q: q.trim() || undefined,
+          lang: lang || undefined,
+          offset,
+        });
+        setItems((current) => offset ? [...current, ...result.items] : result.items);
+        setTotal(result.total);
+        setHasNext(offset + result.items.length < result.total);
       }
-    },
-    [q, lang, tag, anyLang]
-  );
+    } catch (e: any) {
+      setErr(e?.message ?? "Request failed");
+      if (!offset) setItems([]);
+      setHasNext(false);
+    } finally {
+      setBusy(false);
+    }
+  }, [q, lang, source]);
 
   useEffect(() => {
-    const t = setTimeout(() => load(0), 400);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => load(0), 350);
+    return () => clearTimeout(timer);
   }, [load]);
 
   return (
     <>
-      <input className="search" placeholder="Search manhwa & manga…" value={q} onChange={(e) => setQ(e.target.value)} />
-      <TypeChips lang={lang} setLang={setLang} />
-      <div className="chips scroll">
-        <button className={tag === "" ? "chip on" : "chip"} onClick={() => setTag("")}>
-          Any genre
-        </button>
-        {genres.map((g) => (
-          <button key={g.id} className={tag === g.id ? "chip on" : "chip"} onClick={() => setTag(g.id)}>
-            {g.name}
+      <input
+        className="search"
+        placeholder={source === "mangapdf" ? "Search MangaPDF titles…" : "Search manga, manhwa & manhua…"}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      <div className="chips">
+        {([
+          ["MangaDex", "mangadex"],
+          ["MangaPDF", "mangapdf"],
+        ] as [string, MangaSource][]).map(([label, value]) => (
+          <button
+            key={value}
+            className={source === value ? "chip on" : "chip"}
+            onClick={() => {
+              setSource(value);
+              setItems([]);
+              setTotal(0);
+              setHasNext(false);
+              setErr("");
+            }}
+          >
+            {label}
           </button>
         ))}
       </div>
+      {source === "mangadex" && (
+        <div className="chips">
+          {([["All", ""], ["Manhwa", "ko"], ["Manga", "ja"], ["Manhua", "zh"]] as [string, string][]).map(([label, value]) => (
+            <button
+              key={label}
+              className={lang === value ? "chip on" : "chip"}
+              onClick={() => setLang(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {err && <p className="note">{err}</p>}
       <div className="grid">
-        {items.map((m) => (
-          <Poster key={m.id} m={m} open={open} />
-        ))}
+        {items.map((m) => <Poster key={`${m.source}:${m.id}`} m={m} open={open} />)}
       </div>
       {busy && <p className="note">Loading…</p>}
-      {!busy && items.length === 0 && !err && <p className="note">No titles found.</p>}
-      {!busy && items.length > 0 && items.length < total && (
-        <button className="more" onClick={() => load(items.length)}>
-          Load more
-        </button>
+      {!busy && hasNext && (
+        <button className="more" onClick={() => load(items.length)}>Load more</button>
       )}
     </>
   );
@@ -182,18 +228,8 @@ function Detail(props: {
   const [chs, setChs] = useState<Chapter[] | null>(null);
   const [err, setErr] = useState("");
   useEffect(() => {
-    getFeed(m.id, m.lang).then(setChs).catch((e) => setErr(e.message));
-  }, [m.id]);
-
-  const links = m.links ?? {};
-  const official = [["Official English ↗", links.engtl], ["Official raw ↗", links.raw]].filter(([, u]) => u);
-  const hosted = chs?.filter((c) => !c.ext) ?? [];
-  const go = (c: Chapter) => (c.ext ? window.open(c.ext, "_blank") : openChapter(hosted, hosted.indexOf(c)));
-  const start = () => {
-    if (!chs?.length) return;
-    if (hosted.length) openChapter(hosted, hosted.length - 1);
-    else window.open(chs[chs.length - 1].ext, "_blank");
-  };
+    getFeed(m.id, Boolean(m.adult), m.source ?? "mangadex").then(setChs).catch((e) => setErr(e.message));
+  }, [m.id, m.adult, m.source]);
 
   return (
     <div className="page">
@@ -206,7 +242,7 @@ function Detail(props: {
             {m.year ? ` · ${m.year}` : ""}
           </p>
           <div className="actions">
-            <button className="primary" disabled={!chs?.length} onClick={start}>
+            <button className="primary" disabled={!chs?.length} onClick={() => chs && openChapter(chs, chs.length - 1)}>
               ▶ Start
             </button>
             <button className={fav ? "ghost on" : "ghost"} onClick={toggleFav}>
@@ -216,32 +252,17 @@ function Detail(props: {
         </div>
       </div>
       {m.desc && <p className="desc">{m.desc}</p>}
-      {official.length > 0 && (
-        <div className="official">
-          {official.map(([label, url]) => (
-            <a key={label} href={url} target="_blank" rel="noreferrer">
-              {label}
-            </a>
-          ))}
-        </div>
-      )}
       <h2>Chapters {chs ? `(${chs.length})` : ""}</h2>
       {err && <p className="note">{err}</p>}
-      {!chs && !err && <p className="note">Loading all chapters…</p>}
-      {chs && hosted.length === 0 && (
-        <p className="note">
-          MangaDex doesn't host the pages for this title (usually because it is officially licensed).
-          {chs.length ? " Purple chapters open on the official site." : " Use the official links above if shown."}
-        </p>
-      )}
+      {!chs && !err && <p className="note">Loading chapters…</p>}
+      {chs?.length === 0 && <p className="note">No readable free chapters are listed for this title on MangaDex yet. Try another title or check back later.</p>}
       <ul className="chapters">
-        {chs?.map((c) => (
+        {chs?.map((c, i) => (
           <li key={c.id}>
-            <button className={c.ext ? "ch ext" : read.includes(c.id) ? "ch done" : "ch"} onClick={() => go(c)}>
+            <button className={read.includes(c.id) ? "ch done" : "ch"} onClick={() => openChapter(chs, i)}>
               <b>{c.num === "Oneshot" ? "Oneshot" : `Ch. ${c.num}`}</b>
               <span>{c.title}</span>
-              {c.lang !== "en" && <em className="lang">{c.lang.toUpperCase()}</em>}
-              <small>{c.ext ? "↗" : c.date.slice(0, 10)}</small>
+              <small>{c.date.slice(0, 10)}</small>
             </button>
           </li>
         ))}
@@ -264,7 +285,7 @@ function Reader(props: { list: Chapter[]; idx: number; setIdx: (i: number) => vo
     failed.current = false;
     setPages(null);
     setErr("");
-    getPages(ch.id, saver).then(setPages).catch((e) => setErr(e.message));
+    getPages(ch.id, saver, ch.source ?? "mangadex").then(setPages).catch((e) => setErr(e.message));
     box.current?.scrollTo(0, 0);
   }, [ch.id, saver, tries]);
 
@@ -312,7 +333,6 @@ function Reader(props: { list: Chapter[]; idx: number; setIdx: (i: number) => vo
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("home");
-  const [anyLang, setAnyLang] = useState<boolean>(store.get("anyLang", false));
   const [manga, setManga] = useState<Manga | null>(null);
   const [reading, setReading] = useState<{ list: Chapter[]; idx: number } | null>(null);
   const [lib, setLib] = useState<Manga[]>(store.get("lib", []));
@@ -358,19 +378,10 @@ export default function App() {
     <div className="shell">
       <header>
         <span className="logo">Ink<b>pop</b></span>
-        <button
-          className="langbtn"
-          onClick={() => {
-            store.set("anyLang", !anyLang);
-            setAnyLang(!anyLang);
-          }}
-        >
-          {anyLang ? "🌐 Any language" : "🇬🇧 English"}
-        </button>
       </header>
       <main>
-        {tab === "home" && <Home open={setManga} anyLang={anyLang} />}
-        {tab === "browse" && <Browse open={setManga} anyLang={anyLang} />}
+        {tab === "home" && <Home open={setManga} />}
+        {tab === "browse" && <Browse open={setManga} />}
         {tab === "library" &&
           (lib.length ? (
             <div className="grid">
