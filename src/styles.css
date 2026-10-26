@@ -82,3 +82,10 @@ nav button.on { color: var(--pink); }
   .row .poster { flex-basis: 165px; }
   .poster p { font-size: 14px; }
 }
+
+.adult-section { margin-top: 26px; padding-top: 10px; border-top: 2px solid #e8a1c2; }
+.adult-section h2 { color: #a51658; }
+.adult-section h3 { font-size: 15px; margin: 14px 0 9px; }
+.adult-gate { background: #fff; border: 1px solid #f0b7d0; border-radius: 14px; padding: 16px; }
+.adult-gate p { font-size: 13px; line-height: 1.5; color: #6d5a80; margin: 0 0 12px; }
+.adult-gate button:disabled { opacity: .65; }

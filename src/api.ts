@@ -9,6 +9,8 @@ export type Manga = {
   desc: string;
   year: number | null;
   lang: string;
+  adult?: boolean;
+  hasEnglishTitle?: boolean;
 };
 
 export type Chapter = { id: string; num: string; title: string; pages: number; date: string };
@@ -45,6 +47,7 @@ function toManga(m: any): Manga {
     desc: a.description?.en ?? "",
     year: a.year ?? null,
     lang: a.originalLanguage ?? "",
+    hasEnglishTitle: Boolean(englishTitle?.trim()),
   };
 }
 
@@ -54,12 +57,13 @@ export async function listManga(o: {
   sort?: "popular" | "latest";
   offset?: number;
   limit?: number;
+  adultOnly?: boolean;
 }) {
   const p: Params = {
     limit: o.limit ?? 30,
     offset: o.offset ?? 0,
     "includes[]": ["cover_art"],
-    "contentRating[]": RATING,
+    "contentRating[]": o.adultOnly ? ["erotica", "pornographic"] : RATING,
     "availableTranslatedLanguage[]": ["en"],
     hasAvailableChapters: "true",
   };
@@ -67,12 +71,35 @@ export async function listManga(o: {
   if (o.lang) p["originalLanguage[]"] = [o.lang];
   p[o.sort === "latest" ? "order[latestUploadedChapter]" : "order[followedCount]"] = "desc";
   const j = await get("/manga", p);
-  return { items: (j.data as any[]).map(toManga), total: j.total as number };
+  let items = (j.data as any[]).map((entry: any) => ({ ...toManga(entry), adult: Boolean(o.adultOnly) }));
+  // Adult shelves must show English display titles, not silently fall back to
+  // Japanese/Korean/Chinese names. The API filters for free English releases.
+  if (o.adultOnly) items = items.filter((m) => m.hasEnglishTitle).slice(0, o.limit ?? 30);
+  return { items, total: j.total as number };
+}
+
+
+// Fetch every MangaDex result page for a category, keeping only titles with an
+// English display title. MangaDex remains the live source of truth; this does
+// not fabricate titles or chapter listings.
+export async function listAllAdultManga(lang: string): Promise<Manga[]> {
+  const collected: Manga[] = [];
+  const pageSize = 100;
+  let offset = 0;
+  let total = Number.POSITIVE_INFINITY;
+  while (offset < total) {
+    const result = await listManga({ lang, limit: pageSize, offset, adultOnly: true });
+    collected.push(...result.items);
+    total = result.total;
+    if (result.items.length === 0 && offset >= total) break;
+    offset += pageSize;
+  }
+  return collected;
 }
 
 // Prefer English chapters. If none are available, fall back to free chapters
 // published in other languages so titles with non-English releases can still open.
-export async function getFeed(id: string): Promise<Chapter[]> {
+export async function getFeed(id: string, englishOnly = false): Promise<Chapter[]> {
   const fetchFeed = async (englishOnly: boolean) => {
     const out = new Map<string, Chapter>();
     for (let offset = 0; offset < 2000; offset += 500) {
@@ -102,6 +129,7 @@ export async function getFeed(id: string): Promise<Chapter[]> {
     }
     return [...out.values()];
   };
+  if (englishOnly) return fetchFeed(true);
   const english = await fetchFeed(true);
   return english.length ? english : fetchFeed(false);
 }

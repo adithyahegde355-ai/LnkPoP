@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App as CapApp } from "@capacitor/app";
-import { Chapter, Manga, getFeed, getPages, listManga } from "./api";
+import { Chapter, Manga, getFeed, getPages, listAllAdultManga, listManga } from "./api";
 
 type Tab = "home" | "browse" | "library";
 
@@ -33,6 +33,9 @@ function Poster({ m, open }: { m: Manga; open: (m: Manga) => void }) {
 
 function Home({ open }: { open: (m: Manga) => void }) {
   const [rows, setRows] = useState<[string, Manga[]][]>([]);
+  const [adultRows, setAdultRows] = useState<[string, Manga[]][]>([]);
+  const [adultUnlocked, setAdultUnlocked] = useState(false);
+  const [adultBusy, setAdultBusy] = useState(false);
   const [err, setErr] = useState("");
   useEffect(() => {
     Promise.all([
@@ -51,6 +54,27 @@ function Home({ open }: { open: (m: Manga) => void }) {
       )
       .catch((e) => setErr(e.message));
   }, []);
+  const loadAdult = async () => {
+    if (adultUnlocked || adultBusy) return;
+    setAdultBusy(true);
+    try {
+      const [ko, ja, zh] = await Promise.all([
+        listAllAdultManga("ko"),
+        listAllAdultManga("ja"),
+        listAllAdultManga("zh"),
+      ]);
+      setAdultRows([
+        ["🔞 H-Manhwa · English titles & chapters", ko],
+        ["🔞 Hentai Manga · English titles & chapters", ja],
+        ["🔞 H-Manhua · English titles & chapters", zh],
+      ]);
+      setAdultUnlocked(true);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setAdultBusy(false);
+    }
+  };
   if (err) return <p className="note">{err}. Check your connection and reopen the app.</p>;
   if (!rows.length) return <p className="note">Loading…</p>;
   return (
@@ -65,6 +89,20 @@ function Home({ open }: { open: (m: Manga) => void }) {
           </div>
         </section>
       ))}
+      <section className="adult-section">
+        <h2>🔞 18+ Hentai Manga, H-Manhwa &amp; H-Manhua</h2>
+        {!adultUnlocked ? (
+          <div className="adult-gate">
+            <p>Adults only (18+). This section contains mature/sexually explicit fictional comics. By continuing, you confirm you are 18 or older and that viewing this content is legal where you live. The app loads all matching titles returned by the source, across result pages. Only titles with an English display title and free English chapters are requested; availability depends on the source.</p>
+            <button className="primary" onClick={loadAdult} disabled={adultBusy}>{adultBusy ? "Finding English chapters…" : "I am 18+ · Show adult titles"}</button>
+          </div>
+        ) : adultRows.map(([title, items]) => (
+          <section key={title}>
+            <h3>{title}</h3>
+            {items.length ? <div className="row">{items.map((m) => <Poster key={m.id} m={m} open={open} />)}</div> : <p className="note">No titles matching English-title and free-English-chapter filters were returned right now. The source catalogue may not currently have matches.</p>}
+          </section>
+        ))}
+      </section>
     </>
   );
 }
@@ -136,8 +174,8 @@ function Detail(props: {
   const [chs, setChs] = useState<Chapter[] | null>(null);
   const [err, setErr] = useState("");
   useEffect(() => {
-    getFeed(m.id).then(setChs).catch((e) => setErr(e.message));
-  }, [m.id]);
+    getFeed(m.id, Boolean(m.adult)).then(setChs).catch((e) => setErr(e.message));
+  }, [m.id, m.adult]);
 
   return (
     <div className="page">
