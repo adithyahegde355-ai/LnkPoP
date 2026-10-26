@@ -36,15 +36,17 @@ function Home({ open }: { open: (m: Manga) => void }) {
   const [err, setErr] = useState("");
   useEffect(() => {
     Promise.all([
-      listManga({ lang: "ko", limit: 18 }),
-      listManga({ lang: "ja", limit: 18 }),
-      listManga({ sort: "latest", limit: 18 }),
+      listManga({ lang: "ko", limit: 15 }),
+      listManga({ lang: "ja", limit: 15 }),
+      listManga({ lang: "zh", limit: 15 }),
+      listManga({ sort: "latest", limit: 15 }),
     ])
-      .then(([a, b, c]) =>
+      .then(([a, b, c, d]) =>
         setRows([
           ["🔥 Popular manhwa", a.items],
           ["⚡ Popular manga", b.items],
-          ["🆕 Just updated", c.items],
+          ["🐉 Popular manhua", c.items],
+          ["🆕 Just updated", d.items],
         ])
       )
       .catch((e) => setErr(e.message));
@@ -99,7 +101,7 @@ function Browse({ open }: { open: (m: Manga) => void }) {
 
   return (
     <>
-      <input className="search" placeholder="Search manhwa & manga…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input className="search" placeholder="Search manga, manhwa & manhua…" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="chips">
         {[["All", ""], ["Manhwa", "ko"], ["Manga", "ja"], ["Manhua", "zh"]].map(([label, v]) => (
           <button key={label} className={lang === v ? "chip on" : "chip"} onClick={() => setLang(v)}>
@@ -161,7 +163,7 @@ function Detail(props: {
       <h2>Chapters {chs ? `(${chs.length})` : ""}</h2>
       {err && <p className="note">{err}</p>}
       {!chs && !err && <p className="note">Loading chapters…</p>}
-      {chs?.length === 0 && <p className="note">No English chapters available in-app for this title.</p>}
+      {chs?.length === 0 && <p className="note">No readable free chapters are listed for this title on MangaDex yet. Try another title or check back later.</p>}
       <ul className="chapters">
         {chs?.map((c, i) => (
           <li key={c.id}>

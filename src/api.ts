@@ -49,7 +49,7 @@ export async function listManga(o: {
   limit?: number;
 }) {
   const p: Params = {
-    limit: o.limit ?? 24,
+    limit: o.limit ?? 30,
     offset: o.offset ?? 0,
     "includes[]": ["cover_art"],
     "contentRating[]": RATING,
@@ -63,27 +63,40 @@ export async function listManga(o: {
   return { items: (j.data as any[]).map(toManga), total: j.total as number };
 }
 
-// English chapters, newest first, one entry per chapter number
+// Prefer English chapters. If none are available, fall back to free chapters
+// published in other languages so titles with non-English releases can still open.
 export async function getFeed(id: string): Promise<Chapter[]> {
-  const out = new Map<string, Chapter>();
-  for (let offset = 0; offset < 2000; offset += 500) {
-    const j = await get(`/manga/${id}/feed`, {
-      limit: 500,
-      offset,
-      "translatedLanguage[]": ["en"],
-      "order[chapter]": "desc",
-      includeExternalUrl: 0,
-    });
-    for (const c of j.data as any[]) {
-      const a = c.attributes;
-      if (!a.pages) continue;
-      const num = a.chapter ?? "Oneshot";
-      if (!out.has(num))
-        out.set(num, { id: c.id, num, title: a.title ?? "", pages: a.pages, date: a.publishAt ?? "" });
+  const fetchFeed = async (englishOnly: boolean) => {
+    const out = new Map<string, Chapter>();
+    for (let offset = 0; offset < 2000; offset += 500) {
+      const params: Params = {
+        limit: 500,
+        offset,
+        "order[chapter]": "desc",
+        includeExternalUrl: 0,
+      };
+      if (englishOnly) params["translatedLanguage[]"] = ["en"];
+      const j = await get(`/manga/${id}/feed`, params);
+      for (const c of j.data as any[]) {
+        const a = c.attributes;
+        if (!a.pages) continue;
+        const num = a.chapter ?? "Oneshot";
+        if (!out.has(num)) {
+          out.set(num, {
+            id: c.id,
+            num,
+            title: a.title ?? "",
+            pages: a.pages,
+            date: a.publishAt ?? "",
+          });
+        }
+      }
+      if (offset + 500 >= j.total) break;
     }
-    if (offset + 500 >= j.total) break;
-  }
-  return [...out.values()];
+    return [...out.values()];
+  };
+  const english = await fetchFeed(true);
+  return english.length ? english : fetchFeed(false);
 }
 
 export async function getPages(chapterId: string, saver: boolean): Promise<string[]> {
