@@ -1,5 +1,6 @@
 const BASE = "https://api.mangadex.org";
-const RATING = ["safe", "suggestive"];
+const RATING = ["safe", "suggestive"] as const;
+const ADULT_RATING = ["suggestive", "erotica", "pornographic"] as const;
 
 export type Manga = {
   id: string;
@@ -24,7 +25,12 @@ async function get(path: string, p: Params = {}) {
     else u.append(k, String(v));
   }
   const r = await fetch(`${BASE}${path}?${u}`);
-  if (!r.ok) throw new Error(`MangaDex error ${r.status}`);
+  if (!r.ok) {
+    // Keep the server response detail visible for diagnosis instead of hiding
+    // the reason behind a generic HTTP error.
+    const detail = await r.text().catch(() => "");
+    throw new Error(`MangaDex error ${r.status}${detail ? `: ${detail.slice(0, 240)}` : ""}`);
+  }
   return r.json();
 }
 
@@ -63,9 +69,8 @@ export async function listManga(o: {
     limit: o.limit ?? 30,
     offset: o.offset ?? 0,
     "includes[]": ["cover_art"],
-    "contentRating[]": o.adultOnly ? ["erotica", "pornographic"] : RATING,
+    "contentRating[]": o.adultOnly ? [...ADULT_RATING] : [...RATING],
     "availableTranslatedLanguage[]": ["en"],
-    hasAvailableChapters: "true",
   };
   if (o.q) p.title = o.q;
   if (o.lang) p["originalLanguage[]"] = [o.lang];
