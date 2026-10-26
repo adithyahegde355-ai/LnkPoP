@@ -29,9 +29,16 @@ async function get(path: string, p: Params = {}) {
 function toManga(m: any): Manga {
   const a = m.attributes;
   const file = m.relationships?.find((r: any) => r.type === "cover_art")?.attributes?.fileName;
+  // Prefer the official English title. If the main title is not English,
+  // MangaDex may provide an English alternative title in altTitles.
+  const englishAlternative = (a.altTitles ?? [])
+    .map((entry: Record<string, string>) => entry.en)
+    .find((value: string | undefined) => Boolean(value?.trim()));
+  const englishTitle = a.title?.en ?? englishAlternative;
+  const fallbackTitle = (Object.values(a.title ?? {}) as string[]).find(Boolean);
   return {
     id: m.id,
-    title: a.title?.en ?? (Object.values(a.title ?? {})[0] as string) ?? "Untitled",
+    title: englishTitle ?? fallbackTitle ?? "English title unavailable",
     // .256.jpg = small poster thumbnail served by MangaDex
     cover: file ? `https://uploads.mangadex.org/covers/${m.id}/${file}.256.jpg` : "",
     status: a.status ?? "",
