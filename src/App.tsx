@@ -38,47 +38,65 @@ function Home({ open }: { open: (m: Manga) => void }) {
   const [adultBusy, setAdultBusy] = useState(false);
   const [err, setErr] = useState("");
   useEffect(() => {
-    Promise.all([
-      listManga({ lang: "ko", limit: 15 }),
-      listManga({ lang: "ja", limit: 15 }),
-      listManga({ lang: "zh", limit: 15 }),
-      listManga({ sort: "latest", limit: 15 }),
-    ])
-      .then(([a, b, c, d]) =>
-        setRows([
-          ["🔥 Popular manhwa", a.items],
-          ["⚡ Popular manga", b.items],
-          ["🐉 Popular manhua", c.items],
-          ["🆕 Just updated", d.items],
-        ])
-      )
-      .catch((e) => setErr(e.message));
+    let cancelled = false;
+    const shelves: Array<[string, { lang?: string; sort?: "popular" | "latest" }]> = [
+      ["🔥 Popular manhwa", { lang: "ko" }],
+      ["⚡ Popular manga", { lang: "ja" }],
+      ["🐉 Popular manhua", { lang: "zh" }],
+      ["🆕 Just updated", { sort: "latest" }],
+    ];
+    (async () => {
+      const failures: string[] = [];
+      for (const [title, options] of shelves) {
+        try {
+          const result = await listManga({ ...options, limit: 15 });
+          if (!cancelled && result.items.length) {
+            setRows((current) => [...current.filter(([existing]) => existing !== title), [title, result.items]]);
+          }
+        } catch (error: any) {
+          failures.push(`${title}: ${error?.message ?? "request failed"}`);
+        }
+      }
+      if (!cancelled && failures.length) {
+        setErr(failures.length === shelves.length
+          ? `Could not load MangaDex shelves. ${failures[0]}`
+          : `Some shelves could not load: ${failures.join(" · ")}`);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
   const loadAdult = async () => {
     if (adultUnlocked || adultBusy) return;
     setAdultBusy(true);
     try {
-      const [ko, ja, zh] = await Promise.all([
+      const results = await Promise.allSettled([
         listAllAdultManga("ko"),
         listAllAdultManga("ja"),
         listAllAdultManga("zh"),
       ]);
-      setAdultRows([
-        ["🔞 H-Manhwa · English titles & chapters", ko],
-        ["🔞 Hentai Manga · English titles & chapters", ja],
-        ["🔞 H-Manhua · English titles & chapters", zh],
-      ]);
-      setAdultUnlocked(true);
-    } catch (e: any) {
-      setErr(e.message);
+      const labels = [
+        "🔞 H-Manhwa · English titles & chapters",
+        "🔞 Hentai Manga · English titles & chapters",
+        "🔞 H-Manhua · English titles & chapters",
+      ];
+      const nextRows: [string, Manga[]][] = [];
+      const failures: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled") nextRows.push([labels[index], result.value]);
+        else failures.push(`${labels[index]}: ${result.reason?.message ?? "request failed"}`);
+      });
+      setAdultRows(nextRows);
+      setAdultUnlocked(nextRows.length > 0);
+      if (failures.length) setErr(`Some adult shelves could not load: ${failures.join(" · ")}`);
+      if (!nextRows.length) setErr(failures.join(" · ") || "No adult titles could be loaded.");
     } finally {
       setAdultBusy(false);
     }
   };
-  if (err) return <p className="note">{err}. Check your connection and reopen the app.</p>;
-  if (!rows.length) return <p className="note">Loading…</p>;
+  if (!rows.length && !err) return <p className="note">Loading MangaDex titles…</p>;
   return (
     <>
+      {err && <p className="note">{err}</p>}
       {rows.map(([title, items]) => (
         <section key={title}>
           <h2>{title}</h2>
@@ -93,7 +111,7 @@ function Home({ open }: { open: (m: Manga) => void }) {
         <h2>🔞 18+ Hentai Manga, H-Manhwa &amp; H-Manhua</h2>
         {!adultUnlocked ? (
           <div className="adult-gate">
-            <p>Adults only (18+). This section contains mature/sexually explicit fictional comics. By continuing, you confirm you are 18 or older and that viewing this content is legal where you live. The app loads all matching titles returned by the source, across result pages. Only titles with an English display title and free English chapters are requested; availability depends on the source.</p>
+            <p>Adults only (18+). This section contains mature/sexually explicit fictional comics. By continuing, you confirm you are 18 or older and that viewing this content is legal where you live. The app searches matching titles across result pages (up to 5,000 results per language to keep requests bounded). Only titles with an English display title and free English chapters are shown; availability depends on the source.</p>
             <button className="primary" onClick={loadAdult} disabled={adultBusy}>{adultBusy ? "Finding English chapters…" : "I am 18+ · Show adult titles"}</button>
           </div>
         ) : adultRows.map(([title, items]) => (

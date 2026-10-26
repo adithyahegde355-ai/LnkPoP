@@ -1,6 +1,6 @@
 const BASE = "https://api.mangadex.org";
 const RATING = ["safe", "suggestive"] as const;
-const ADULT_RATING = ["suggestive", "erotica", "pornographic"] as const;
+const ADULT_RATING = ["erotica", "pornographic"] as const;
 
 export type Manga = {
   id: string;
@@ -18,20 +18,74 @@ export type Chapter = { id: string; num: string; title: string; pages: number; d
 
 type Params = Record<string, string | number | string[]>;
 
-async function get(path: string, p: Params = {}) {
+// Keep API failures readable in the app. MangaDex can return HTML (for example,
+// an edge/proxy error page), so do not dump the entire response into the UI.
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+let requestTail: Promise<void> = Promise.resolve();
+let lastRequestAt = 0;
+
+async function paceRequests() {
+  const waitForTurn = requestTail.then(async () => {
+    const delay = Math.max(0, 250 - (Date.now() - lastRequestAt));
+    if (delay) await sleep(delay);
+    lastRequestAt = Date.now();
+  });
+  requestTail = waitForTurn.catch(() => {});
+  await waitForTurn;
+}
+
+async function get(path: string, p: Params = {}, retries = 2): Promise<any> {
   const u = new URLSearchParams();
   for (const [k, v] of Object.entries(p)) {
     if (Array.isArray(v)) v.forEach((x) => u.append(k, x));
     else u.append(k, String(v));
   }
-  const r = await fetch(`${BASE}${path}?${u}`);
-  if (!r.ok) {
-    // Keep the server response detail visible for diagnosis instead of hiding
-    // the reason behind a generic HTTP error.
-    const detail = await r.text().catch(() => "");
-    throw new Error(`MangaDex error ${r.status}${detail ? `: ${detail.slice(0, 240)}` : ""}`);
+  const url = `${BASE}${path}?${u.toString()}`;
+
+  for (let attempt = 0; ; attempt++) {
+    await paceRequests();
+    let response: Response;
+    try {
+      response = await fetch(url, { headers: { Accept: "application/json" } });
+    } catch (error) {
+      if (attempt < retries) {
+        await sleep(500 * (attempt + 1));
+        continue;
+      }
+      throw new Error("Could not connect to MangaDex. Check your internet connection and try again.");
+    }
+
+    if ((response.status === 429 || response.status >= 500) && attempt < retries) {
+      const retryAfter = Number(response.headers.get("Retry-After"));
+      await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 800 * (attempt + 1));
+      continue;
+    }
+
+    if (!response.ok) {
+      const contentType = response.headers.get("content-type") ?? "";
+      const body = await response.text().catch(() => "");
+      let detail = "";
+      if (contentType.includes("json")) {
+        try {
+          const parsed = JSON.parse(body);
+          detail = Array.isArray(parsed.errors)
+            ? parsed.errors.map((item: any) => item.detail ?? item.title).filter(Boolean).join("; ")
+            : parsed.message ?? "";
+        } catch { /* Keep the generic status message. */ }
+      } else if (body && !/<html|<!doctype/i.test(body)) {
+        detail = body.slice(0, 160).replace(/\\s+/g, " ");
+      } else if (body) {
+        detail = "The server returned an HTML page instead of API JSON";
+      }
+      throw new Error(`MangaDex request failed (HTTP ${response.status})${detail ? `: ${detail}` : ""}.`);
+    }
+
+    try {
+      return await response.json();
+    } catch {
+      throw new Error("MangaDex returned an invalid response. Please try again.");
+    }
   }
-  return r.json();
 }
 
 function toManga(m: any): Manga {
@@ -89,14 +143,21 @@ export async function listManga(o: {
 // not fabricate titles or chapter listings.
 export async function listAllAdultManga(lang: string): Promise<Manga[]> {
   const collected: Manga[] = [];
+  const seen = new Set<string>();
   const pageSize = 100;
+  const maxResults = 5000; // Avoid an unbounded request loop if the source changes during pagination.
   let offset = 0;
   let total = Number.POSITIVE_INFINITY;
-  while (offset < total) {
+  while (offset < total && offset < maxResults) {
     const result = await listManga({ lang, limit: pageSize, offset, adultOnly: true });
-    collected.push(...result.items);
+    for (const item of result.items) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        collected.push(item);
+      }
+    }
     total = result.total;
-    if (result.items.length === 0 && offset >= total) break;
+    if (result.items.length === 0 || result.total <= offset + pageSize) break;
     offset += pageSize;
   }
   return collected;
